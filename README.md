@@ -22,9 +22,22 @@ A minor-mode package that extends Emacs `tab-bar-mode` to display a vertical tab
 
 ## Installation
 
+### From MELPA
+
+`M-x package-install RET vtab RET`
+
 ```elisp
-(load-file "/path/to/vtab.el")
+(require 'vtab)
 (vtab-mode 1)
+```
+
+### With use-package
+
+```elisp
+(use-package vtab
+  :ensure t
+  :config
+  (vtab-mode 1))
 ```
 
 ## Usage
