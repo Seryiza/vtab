@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased
+
+- Fix `vtab-hide-scroll-bars` so nil shows a vertical scrollbar in the side window.
+- Fix `vtab-active-fill-width` so the active row uses the extending face, including the final tab.
+- Fix full-width active tabs so short labels do not show Emacs' truncation marker or trigger horizontal scrolling, while long labels still show `$`.
+
 ## v1.1.0
 
 - Add defcustom for window-divider and fringe styling control

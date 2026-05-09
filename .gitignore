@@ -1,3 +1,7 @@
+.microvm/
+.direnv/
+result
+result-*
 *.elc
 .claude/
 CLAUDE.md
