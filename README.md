@@ -82,6 +82,14 @@ Direct tab selection (right-hand home row layout):
 | `vtab-hide-cursor` | `nil` | Hide the cursor in the side window |
 | `vtab-hide-scroll-bars` | `nil` | Hide scroll bars in the side window |
 | `vtab-hide-mode-line` | `nil` | Hide the mode line in the side window |
+| `vtab-active-fill-width` | `nil` | Highlight the active tab to the side window edge |
+
+Faces:
+
+| Face | Description |
+|------|-------------|
+| `vtab-active-face` | Active tab text |
+| `vtab-active-line` | Full-width active tab line when `vtab-active-fill-width` is non-nil |
 
 Keybindings can be customized via `define-key`:
 

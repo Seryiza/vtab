@@ -102,6 +102,13 @@
   :type 'boolean
   :group 'vtab)
 
+(defcustom vtab-active-fill-width nil
+  "Non-nil means highlight the active tab to the side window edge.
+The filled area uses `vtab-active-line' while the tab text still uses
+`vtab-active-face'."
+  :type 'boolean
+  :group 'vtab)
+
 (defvar vtab-mode) ; Forward declaration for byte-compiler; defined by `define-minor-mode'.
 
 ;;;; Keymaps
@@ -154,7 +161,14 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
 
 (defface vtab-active-face
   '((t :background "#3a3a8a" :foreground "#aaaaaa" :weight bold))
-  "Face for the active tab.")
+  "Face for the active tab."
+  :group 'vtab)
+
+(defface vtab-active-line
+  '((t :inherit vtab-active-face :extend t))
+  "Face for the full-width active tab line.
+This face is used only when `vtab-active-fill-width' is non-nil."
+  :group 'vtab)
 
 ;;;; Internal Functions
 
@@ -174,7 +188,7 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
   "Refresh the vertical tab bar buffer."
   (let* ((tabs (vtab--get-tabs))
          (current (vtab--current-tab-index))
-         (new-state (cons current tabs)))
+         (new-state (list current vtab-active-fill-width tabs)))
     (when (and current
                (not (equal new-state (frame-parameter nil 'vtab--tab-state))))
       (set-frame-parameter nil 'vtab--tab-state new-state)
@@ -191,7 +205,10 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
                                     'vtab-index (1+ i)
                                     'mouse-face 'highlight
                                     'keymap vtab--buffer-keymap
-                                    'face (when is-current 'vtab-active-face)))))
+                                    'face (when is-current
+                                            (if vtab-active-fill-width
+                                                '(vtab-active-face vtab-active-line)
+                                              'vtab-active-face))))))
             (setq buffer-read-only t)))))))
 
 (defun vtab--click (event)
@@ -265,7 +282,7 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
   (vtab--ensure-visible))
 
 (defun vtab--on-window-size-change (&optional frame)
-  "Hook function called after window size change.
+  "Hook function called after window size change in FRAME.
 Adjust the side window width to match `vtab-window-width'."
   (when (and vtab-mode (not vtab--resizing))
     (let ((f (or frame (selected-frame))))
