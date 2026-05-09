@@ -16,6 +16,7 @@ A minor-mode package that extends Emacs `tab-bar-mode` to display a vertical tab
 - Vertical tab bar in a dedicated side window (left or right)
 - Click or keyboard to switch tabs
 - Direct tab selection with customizable key sequences
+- Optional minimal scrolling to keep the selected tab visible
 - `M-x customize` support for display settings
 - Clean enable/disable: restores original settings when disabled
 - Protected side window (`C-x o` skips it, `C-x 1` preserves it)
@@ -83,6 +84,7 @@ Direct tab selection (right-hand home row layout):
 | `vtab-hide-scroll-bars` | `nil` | Hide scroll bars in the side window |
 | `vtab-hide-mode-line` | `nil` | Hide the mode line in the side window |
 | `vtab-active-fill-width` | `nil` | Highlight the active tab to the side window edge |
+| `vtab-scroll-to-current-tab` | `t` | Scroll just enough to keep the current tab visible |
 
 Faces:
 
