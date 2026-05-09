@@ -171,12 +171,13 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
               (let* ((name (nth i tabs))
                      (is-current (= i current))
                      (marker (if is-current ">" " "))
-                     (line (format "%s %d: %s\n" marker (1+ i) name)))
+                     (line (format "%s %d: %s" marker (1+ i) name)))
                 (insert (propertize line
                                     'vtab-index (1+ i)
                                     'mouse-face 'highlight
                                     'keymap vtab--buffer-keymap
-                                    'face (when is-current 'vtab-active-face)))))
+                                    'face (when is-current 'vtab-active-face)))
+                (insert "\n")))
             (setq buffer-read-only t)))))))
 
 (defun vtab--click (event)
