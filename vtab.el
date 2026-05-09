@@ -87,6 +87,21 @@
   :type 'boolean
   :group 'vtab)
 
+(defcustom vtab-hide-cursor nil
+  "Non-nil means hide the cursor in the vtab side window."
+  :type 'boolean
+  :group 'vtab)
+
+(defcustom vtab-hide-scroll-bars nil
+  "Non-nil means hide scroll bars in the vtab side window."
+  :type 'boolean
+  :group 'vtab)
+
+(defcustom vtab-hide-mode-line nil
+  "Non-nil means hide the mode line in the vtab side window."
+  :type 'boolean
+  :group 'vtab)
+
 (defvar vtab-mode) ; Forward declaration for byte-compiler; defined by `define-minor-mode'.
 
 ;;;; Keymaps
@@ -210,7 +225,16 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
       ;; Protect from delete-other-windows
       (set-window-parameter win 'no-delete-other-windows t)
       ;; Remove fringes for clean border
-      (set-window-fringes win 0 0))
+      (set-window-fringes win 0 0)
+      ;; Hide cursor and mode line if configured
+      (with-current-buffer (window-buffer win)
+        (when vtab-hide-cursor
+          (setq-local cursor-type nil))
+        (when vtab-hide-mode-line
+          (setq-local mode-line-format nil)))
+      ;; Hide scroll bars if configured
+      (when vtab-hide-scroll-bars
+        (set-window-scroll-bars win 0 nil 0 nil t)))
     (vtab--refresh)))
 
 ;;;; Commands
