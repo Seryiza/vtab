@@ -233,10 +233,11 @@ Clamp the saved start line to LINE-COUNT when non-nil."
 
 (defun vtab--window-body-lines (win)
   "Return the number of display rows usable for tabs in WIN.
-Use pixel height rounded up so a bottom row that Emacs can display is
-counted even when `window-body-height' rounds it down."
-  (max 1 (ceiling (window-body-height win t)
-                  (frame-char-height (window-frame win)))))
+Only count rows that fully fit in the window body.  A partially visible bottom
+row is not usable for tab selection because it can be obscured by adjacent mode
+lines when the vtab mode line is hidden."
+  (max 1 (floor (window-body-height win t)
+                (frame-char-height (window-frame win)))))
 
 (defun vtab--refresh ()
   "Refresh the vertical tab bar buffer."
