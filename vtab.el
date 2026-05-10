@@ -243,7 +243,8 @@ counted even when `window-body-height' rounds it down."
   (let* ((tabs (vtab--get-tabs))
          (current (vtab--current-tab-index))
          (buf (vtab--get-buffer))
-         (state (vtab--window-state)))
+         (state (vtab--window-state))
+         (last-index (1- (length tabs))))
     (when current
       (with-current-buffer buf
         (let ((inhibit-read-only t))
@@ -251,18 +252,24 @@ counted even when `window-body-height' rounds it down."
           (dotimes (i (length tabs))
             (let* ((name (nth i tabs))
                    (is-current (= i current))
+                   (fill-active (and is-current vtab-active-fill-width))
+                   (index (1+ i))
                    (marker (if is-current ">" " "))
-                   (line (format "%s %d: %s" marker (1+ i) name)))
+                   (line (format "%s %d: %s" marker index name)))
               (insert (propertize line
-                                  'vtab-index (1+ i)
+                                  'vtab-index index
                                   'mouse-face 'highlight
                                   'keymap vtab--buffer-keymap
-                                  'face (when is-current
-                                          (if vtab-active-fill-width
-                                              '(vtab-active-face vtab-active-line)
-                                            'vtab-active-face))))
-              (unless (= i (1- (length tabs)))
-                (insert "\n"))))
+                                  'face (when is-current 'vtab-active-face)))
+              (cond
+               (fill-active
+                (insert (propertize "\n"
+                                    'vtab-index index
+                                    'mouse-face 'highlight
+                                    'keymap vtab--buffer-keymap
+                                    'face 'vtab-active-line)))
+               ((< i last-index)
+                (insert "\n")))))
           (setq buffer-read-only t))
         (vtab--restore-window-state state nil (length tabs))))
     current))
