@@ -70,7 +70,7 @@ let
             and ((.rect.height? // 0) > 0);
           [
             .. | objects
-            | select(.type? == "con")
+            | select(.type? == "con" or .type? == "floating_con")
             | select(real_window)
             | select(text | contains($q | ascii_downcase))
           ]
@@ -97,7 +97,7 @@ let
         ${pkgs.sway}/bin/swaymsg -t get_tree | ${pkgs.jq}/bin/jq -r '
           [
             .. | objects
-            | select(.type? == "con")
+            | select(.type? == "con" or .type? == "floating_con")
             | select(.pid? != null or .app_id? != null or .window_properties? != null)
             | select(((.rect.width? // 0) > 0) and ((.rect.height? // 0) > 0))
             | {
@@ -146,7 +146,7 @@ let
             and ((.rect.height? // 0) > 0);
           [
             .. | objects
-            | select(.type? == "con")
+            | select(.type? == "con" or .type? == "floating_con")
             | select(real_window)
             | select(text | contains($q | ascii_downcase))
           ]
@@ -479,6 +479,7 @@ let
         VISUAL = "codex-editor";
         VTAB_CODEX_APP_SERVER_LISTEN = codexAppServerListen;
         VTAB_CODEX_REMOTE_URL = codexAppServerRemote;
+        XDG_CACHE_HOME = "/tmp/codex-cache";
         XDG_CURRENT_DESKTOP = "sway";
         XDG_SESSION_TYPE = "wayland";
         WLR_RENDERER_ALLOW_SOFTWARE = "1";
@@ -540,6 +541,7 @@ let
         "d ${codexHome}/.codex 0700 codex codex -"
         "d ${codexHome}/.emacs.d 0755 codex codex -"
         "d ${codexHome}/screenshots 0755 codex codex -"
+        "d /tmp/codex-cache 0700 codex codex -"
         "C ${codexHome}/.codex/config.toml 0600 codex codex - /etc/codex/config.toml"
         "L+ ${codexHome}/.emacs.d/init.el - - - - /etc/emacs/init.el"
       ];
