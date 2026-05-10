@@ -6,6 +6,8 @@
   stateDir ? "${projectRoot}/.microvm/codex",
   hypervisor ? "qemu",
   tapInterface ? "",
+  codexAppServerPort ? 4500,
+  codexAppServerHostAddress ? "127.0.0.1",
 }:
 
 let
@@ -17,6 +19,8 @@ let
 
   projectMount = "/workspace/vtab";
   codexHome = "/home/codex";
+  codexAppServerListen = "ws://0.0.0.0:${toString codexAppServerPort}";
+  codexAppServerRemote = "ws://${codexAppServerHostAddress}:${toString codexAppServerPort}";
 
   module =
     {
@@ -60,13 +64,30 @@ let
             | map(. // "")
             | join(" ")
             | ascii_downcase;
+          def real_window:
+            (.pid? != null or .app_id? != null or .window_properties? != null)
+            and ((.rect.width? // 0) > 0)
+            and ((.rect.height? // 0) > 0);
           [
             .. | objects
             | select(.type? == "con")
+            | select(real_window)
             | select(text | contains($q | ascii_downcase))
-          ][0].rect
+          ]
+          | sort_by(if .focused then 0 else 1 end, .rect.x, .rect.y)
+          | .[0].rect
           | "\(.x),\(.y) \(.width)x\(.height)"
-        ')"
+        ')" || {
+          echo "No visible Sway window matched '$query'." >&2
+          echo "Visible windows:" >&2
+          ${vmWindows}/bin/vm-windows >&2 || true
+          exit 1
+        }
+
+        if ! [[ "$geometry" =~ ^[0-9]+,[0-9]+\ [1-9][0-9]*x[1-9][0-9]*$ ]]; then
+          echo "Invalid geometry for '$query': $geometry" >&2
+          exit 1
+        fi
 
         exec ${pkgs.grim}/bin/grim -g "$geometry" "$out"
       '';
@@ -77,7 +98,8 @@ let
           [
             .. | objects
             | select(.type? == "con")
-            | select((.app_id? // .window_properties.class? // "") != "")
+            | select(.pid? != null or .app_id? != null or .window_properties? != null)
+            | select(((.rect.width? // 0) > 0) and ((.rect.height? // 0) > 0))
             | {
                 id,
                 app_id: (.app_id // ""),
@@ -118,14 +140,52 @@ let
             | map(. // "")
             | join(" ")
             | ascii_downcase;
+          def real_window:
+            (.pid? != null or .app_id? != null or .window_properties? != null)
+            and ((.rect.width? // 0) > 0)
+            and ((.rect.height? // 0) > 0);
           [
             .. | objects
             | select(.type? == "con")
+            | select(real_window)
             | select(text | contains($q | ascii_downcase))
-          ][0].id
-        ')"
+          ]
+          | sort_by(if .focused then 0 else 1 end, .rect.x, .rect.y)
+          | .[0].id
+        ')" || {
+          echo "No visible Sway window matched '$query'." >&2
+          echo "Visible windows:" >&2
+          ${vmWindows}/bin/vm-windows >&2 || true
+          exit 1
+        }
 
         exec ${pkgs.sway}/bin/swaymsg "[con_id=$id]" focus
+      '';
+
+      vmEmacs = pkgs.writeShellScriptBin "vm-emacs" ''
+        set -euo pipefail
+
+        if [ -z "''${SWAYSOCK:-}" ]; then
+          echo "vm-emacs must run inside the Sway session." >&2
+          exit 1
+        fi
+
+        args=(
+          ${pkgs.emacs}/bin/emacs
+          -Q
+          -L
+          ${projectMount}
+        )
+
+        if [ "$#" -eq 0 ]; then
+          args+=(--load ${projectMount}/init.el)
+        else
+          args+=("$@")
+        fi
+
+        command="$(${pkgs.bash}/bin/printf ' %q' "''${args[@]}")"
+        command="''${command:1}"
+        exec ${pkgs.sway}/bin/swaymsg exec "$command"
       '';
 
       vmType = pkgs.writeShellScriptBin "vm-type" ''
@@ -230,6 +290,19 @@ let
         # can continue immediately instead of blocking on Emacs or another TUI.
         exit 0
       '';
+
+      codexAppServer = pkgs.writeShellScriptBin "codex-app-server" ''
+        set -euo pipefail
+        cd ${projectMount}
+        exec ${pkgs.codex}/bin/codex app-server \
+          --listen ${codexAppServerListen} \
+          -c sandbox_mode='"danger-full-access"' \
+          -c approval_policy='"never"' \
+          -c default_permissions='":danger-no-sandbox"' \
+          -c model_reasoning_effort='"high"' \
+          -c shell_environment_policy.inherit='"all"' \
+          "$@"
+      '';
     in
     {
       networking.hostName = "vtab-codex";
@@ -293,11 +366,19 @@ let
             mac = "02:00:00:00:00:02";
           };
 
-        forwardPorts = lib.optional isQemu {
-          from = "host";
-          host.port = 2222;
-          guest.port = 22;
-        };
+        forwardPorts = lib.optionals isQemu [
+          {
+            from = "host";
+            host.port = 2222;
+            guest.port = 22;
+          }
+          {
+            from = "host";
+            host.address = codexAppServerHostAddress;
+            host.port = codexAppServerPort;
+            guest.port = codexAppServerPort;
+          }
+        ];
 
         qemu.serialConsole = false;
         virtiofsd.group = null;
@@ -319,7 +400,7 @@ let
       hardware.graphics.enable = true;
       services.dbus.enable = true;
       services.openssh.enable = true;
-      networking.firewall.allowedTCPPorts = lib.optional isQemu 22;
+      networking.firewall.allowedTCPPorts = lib.unique ([ codexAppServerPort ] ++ lib.optional isQemu 22);
       networking.useDHCP = lib.mkDefault true;
 
       nix = {
@@ -396,6 +477,8 @@ let
         GIT_EDITOR = "codex-editor";
         HUMAN_EDITOR = "emacs";
         VISUAL = "codex-editor";
+        VTAB_CODEX_APP_SERVER_LISTEN = codexAppServerListen;
+        VTAB_CODEX_REMOTE_URL = codexAppServerRemote;
         XDG_CURRENT_DESKTOP = "sway";
         XDG_SESSION_TYPE = "wayland";
         WLR_RENDERER_ALLOW_SOFTWARE = "1";
@@ -405,6 +488,7 @@ let
         bashInteractive
         bubblewrap
         codex
+        codexAppServer
         codexEditor
         curl
         emacs
@@ -424,6 +508,7 @@ let
         statix
         sway
         vmClick
+        vmEmacs
         vmFocus
         vmKey
         vmMoveMouse
@@ -441,6 +526,11 @@ let
         cli_auth_credentials_store = "file"
         sandbox_mode = "danger-full-access"
         approval_policy = "never"
+        default_permissions = ":danger-no-sandbox"
+        model_reasoning_effort = "high"
+
+        [shell_environment_policy]
+        inherit = "all"
 
         [projects."${projectMount}"]
         trust_level = "trusted"
@@ -467,7 +557,7 @@ let
         workspace_layout tabbed
 
         exec_always ${pkgs.coreutils}/bin/mkdir -p ${codexHome}/screenshots ${codexHome}/.codex
-        exec ${pkgs.foot}/bin/foot --title codex-vm --working-directory ${projectMount} ${pkgs.codex}/bin/codex --dangerously-bypass-approvals-and-sandbox
+        exec ${pkgs.foot}/bin/foot --title codex-app-server --working-directory ${projectMount} ${codexAppServer}/bin/codex-app-server
 
         bindsym Print exec ${vmScreenshot}/bin/vm-screenshot
         bindsym $mod+Return exec ${pkgs.foot}/bin/foot --working-directory ${projectMount}

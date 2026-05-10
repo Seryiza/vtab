@@ -109,11 +109,20 @@
                 state_dir="''${VTAB_MICROVM_STATE_DIR:-$project_root/.microvm/codex}"
                 hypervisor="''${VTAB_MICROVM_HYPERVISOR:-${defaultHypervisor}}"
                 tap_interface="''${VTAB_MICROVM_TAP:-}"
+                codex_app_server_port="''${VTAB_CODEX_APP_SERVER_PORT:-4500}"
+                codex_app_server_host_address="''${VTAB_CODEX_APP_SERVER_HOST:-127.0.0.1}"
 
                 if [ "$hypervisor" = "cloud-hypervisor" ] && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
                   echo "cloud-hypervisor graphics needs a host Wayland session (WAYLAND_DISPLAY is unset)." >&2
                   exit 1
                 fi
+
+                case "$codex_app_server_port" in
+                  ""|*[!0-9]*)
+                    echo "VTAB_CODEX_APP_SERVER_PORT must be a decimal TCP port." >&2
+                    exit 1
+                    ;;
+                esac
 
                 if [ "$hypervisor" = "cloud-hypervisor" ] && [ -z "$tap_interface" ]; then
                   echo "warning: cloud-hypervisor has graphics forwarding but no default user networking; set VTAB_MICROVM_TAP for guest internet." >&2
@@ -131,9 +140,18 @@
                   --argstr projectRoot "$project_root" \
                   --argstr stateDir "$state_dir" \
                   --argstr hypervisor "$hypervisor" \
-                  --argstr tapInterface "$tap_interface")"
+                  --argstr tapInterface "$tap_interface" \
+                  --arg codexAppServerPort "$codex_app_server_port" \
+                  --argstr codexAppServerHostAddress "$codex_app_server_host_address")"
 
                 cd "$state_dir"
+
+                echo "Codex App Server:"
+                echo "  VM:   starts codex-app-server automatically"
+                echo "  Host: codex --dangerously-bypass-approvals-and-sandbox --remote ws://$codex_app_server_host_address:$codex_app_server_port"
+                if [ "$hypervisor" != "qemu" ]; then
+                  echo "  Note: microvm.forwardPorts is only configured for qemu user networking."
+                fi
 
                 cleanup() {
                   if [ -n "''${virtiofsd_pid:-}" ]; then

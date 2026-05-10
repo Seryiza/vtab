@@ -121,6 +121,28 @@ Keybindings can be customized via `define-key`:
 emacs -batch -f batch-byte-compile vtab.el
 ```
 
+### Codex MicroVM
+
+```bash
+nix run .#codex-vm
+```
+
+The VM starts the Codex App Server automatically and the QEMU MicroVM forwards
+it to the host on localhost:
+
+```bash
+codex --dangerously-bypass-approvals-and-sandbox --remote ws://127.0.0.1:4500
+```
+
+Inside the VM boundary, Codex is configured for unattended full access:
+`approval_policy = "never"`, `sandbox_mode = "danger-full-access"`, and
+`default_permissions = ":danger-no-sandbox"`. It also defaults to
+`model_reasoning_effort = "high"`. The app server passes the same settings
+explicitly on its command line and preserves the Sway/Wayland environment for
+GUI helpers such as `vm-screenshot`.
+
+Override the forwarded port with `VTAB_CODEX_APP_SERVER_PORT`.
+
 </details>
 
 ---

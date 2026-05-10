@@ -11,6 +11,7 @@ Useful commands:
 
 Inside the Codex MicroVM, the project is mounted at `/workspace/vtab` and Codex state is under `/home/codex/.codex`.
 The default `EDITOR`, `VISUAL`, and `GIT_EDITOR` are `codex-editor`, a non-interactive no-op helper so tools that spawn an editor do not block the agent. Use `emacs` directly, or `$HUMAN_EDITOR`, when a real editor is needed.
+The QEMU MicroVM starts `codex-app-server` automatically on `ws://0.0.0.0:4500`; the host can connect with `codex --dangerously-bypass-approvals-and-sandbox --remote ws://127.0.0.1:4500`. Override the forwarded port with `VTAB_CODEX_APP_SERVER_PORT` when starting `nix run .#codex-vm`. Inside the VM boundary, Codex uses `approval_policy = "never"`, `sandbox_mode = "danger-full-access"`, `default_permissions = ":danger-no-sandbox"`, and `model_reasoning_effort = "high"` in both config and app-server command-line overrides.
 
 GUI helpers inside the MicroVM:
 
