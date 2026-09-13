@@ -81,10 +81,10 @@ Direct tab selection (right-hand home row layout):
 | `vtab-style-window-divider` | `t` | Set window-divider to 1px thin line |
 | `vtab-style-fringe` | `t` | Make fringe background transparent |
 | `vtab-hide-cursor` | `nil` | Hide the cursor in the side window |
-| `vtab-hide-scroll-bars` | `nil` | Hide scroll bars in the side window |
-| `vtab-hide-mode-line` | `nil` | Hide the mode line in the side window |
+| `vtab-hide-scroll-bars` | `nil` | Hide both scroll bars; when disabled, inherit their frame settings |
+| `vtab-hide-mode-line` | `nil` | Hide both the mode line and header line in the side window |
 | `vtab-active-fill-width` | `nil` | Highlight the active tab to the side window edge |
-| `vtab-scroll-to-current-tab` | `t` | Scroll just enough to keep the current tab visible |
+| `vtab-scroll-to-current-tab` | `t` | Scroll by rendered row height just enough to keep the current tab visible |
 
 Faces:
 
@@ -108,6 +108,8 @@ Keybindings can be customized via `define-key`:
 <summary>Development</summary>
 
 ### Test
+
+Run `emacs -Q --batch -L . -L test -l test/vtab-test.el -f ert-run-tests-batch-and-exit`.
 
 ```elisp
 (load-file "vtab.el")

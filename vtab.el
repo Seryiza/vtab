@@ -98,7 +98,7 @@
   :group 'vtab)
 
 (defcustom vtab-hide-mode-line nil
-  "Non-nil means hide the mode line in the vtab side window."
+  "Non-nil means hide the mode and header lines in the vtab side window."
   :type 'boolean
   :group 'vtab)
 
@@ -149,6 +149,7 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
         buf
       (let ((new-buf (generate-new-buffer " *vtab*")))
         (set-frame-parameter f 'vtab--buffer new-buf)
+        (set-frame-parameter f 'vtab--tab-state nil)
         (with-current-buffer new-buf
           (setq-local truncate-lines t))
         new-buf))))
@@ -159,8 +160,8 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
 (defvar vtab--resizing nil
   "Non-nil while vtab is resizing window to prevent infinite loop.")
 
-(defvar vtab--selecting-tab nil
-  "Non-nil while vtab is preserving its window state across tab selection.")
+(defvar-local vtab--saved-buffer-settings nil
+  "Alist of buffer-local display settings changed by vtab.")
 
 (defvar vtab--buffer-keymap
   (let ((map (make-sparse-keymap)))
@@ -203,76 +204,64 @@ This face is used only when `vtab-active-fill-width' is non-nil."
     (forward-line (1- line))
     (point)))
 
-(defun vtab--window-state (&optional frame)
-  "Return vtab window scroll state for FRAME."
-  (let* ((f (or frame (selected-frame)))
-         (buf (frame-parameter f 'vtab--buffer)))
-    (when (buffer-live-p buf)
-      (when-let* ((win (get-buffer-window buf f)))
-        (with-current-buffer buf
-          (list :line (line-number-at-pos (window-start win) t)
-                :vscroll (window-vscroll win)))))))
+(defun vtab--row-column (position)
+  "Return the 1-based row and display column at POSITION."
+  (save-excursion
+    (goto-char position)
+    (cons (line-number-at-pos nil t) (current-column))))
 
-(defun vtab--restore-window-state (state &optional frame line-count)
-  "Restore vtab window scroll STATE for FRAME.
-Clamp the saved start line to LINE-COUNT when non-nil."
-  (when state
-    (let* ((f (or frame (selected-frame)))
-           (buf (frame-parameter f 'vtab--buffer))
-           (line (if line-count
-                     (min (plist-get state :line) (max 1 line-count))
-                   (plist-get state :line)))
-           (vscroll (plist-get state :vscroll)))
-      (when (and (buffer-live-p buf) line)
-        (when-let* ((win (get-buffer-window buf f)))
-          (with-current-buffer buf
-            (let ((pos (vtab--line-position line)))
-              (set-window-vscroll win (or vscroll 0))
-              (set-window-start win pos t)
-              (set-window-point win pos))))))))
-
-(defun vtab--window-body-lines (win)
-  "Return the number of display rows usable for tabs in WIN.
-Only count rows that fully fit in the window body.  A partially visible bottom
-row is not usable for tab selection because it can be obscured by adjacent mode
-lines when the vtab mode line is hidden."
-  (max 1 (floor (window-body-height win t)
-                (frame-char-height (window-frame win)))))
+(defun vtab--row-column-position (row-column line-count)
+  "Return position for ROW-COLUMN, clamped to LINE-COUNT rows."
+  (goto-char (vtab--line-position
+              (min (car row-column) (max 1 line-count))))
+  (move-to-column (cdr row-column))
+  (point))
 
 (defun vtab--refresh ()
-  "Refresh the vertical tab bar buffer."
+  "Refresh the vertical tab bar buffer and return the current tab."
   (let* ((tabs (vtab--get-tabs))
          (current (vtab--current-tab-index))
          (buf (vtab--get-buffer))
-         (state (vtab--window-state))
-         (last-index (1- (length tabs))))
-    (when current
-      (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (dotimes (i (length tabs))
-            (let* ((name (nth i tabs))
-                   (is-current (= i current))
-                   (fill-active (and is-current vtab-active-fill-width))
-                   (index (1+ i))
-                   (marker (if is-current ">" " "))
-                   (line (format "%s %d: %s" marker index name)))
-              (insert (propertize line
-                                  'vtab-index index
-                                  'mouse-face 'highlight
-                                  'keymap vtab--buffer-keymap
-                                  'face (when is-current 'vtab-active-face)))
-              (cond
-               (fill-active
-                (insert (propertize "\n"
-                                    'vtab-index index
-                                    'mouse-face 'highlight
-                                    'keymap vtab--buffer-keymap
-                                    'face 'vtab-active-line)))
-               ((< i last-index)
-                (insert "\n")))))
-          (setq buffer-read-only t))
-        (vtab--restore-window-state state nil (length tabs))))
+         (new-state (list current tabs vtab-active-fill-width)))
+    (when (and current
+               (not (equal new-state (frame-parameter nil 'vtab--tab-state))))
+      (let ((win (get-buffer-window buf)))
+        (with-current-buffer buf
+          (let ((buffer-point (vtab--row-column (point)))
+                (window-state
+                 (when (window-live-p win)
+                   (list (line-number-at-pos (window-start win) t)
+                         (vtab--row-column (window-point win))
+                         (window-vscroll win t))))
+                (inhibit-read-only t))
+            (erase-buffer)
+            (dotimes (i (length tabs))
+              (let* ((name (nth i tabs))
+                     (is-current (= i current))
+                     (marker (if is-current ">" " "))
+                     (line (propertize
+                            (format "%s %d: %s\n" marker (1+ i) name)
+                            'vtab-index (1+ i)
+                            'mouse-face 'highlight
+                            'keymap vtab--buffer-keymap
+                            'face (when is-current 'vtab-active-face))))
+                (put-text-property (1- (length line)) (length line) 'face
+                                   (when (and is-current vtab-active-fill-width)
+                                     'vtab-active-line)
+                                   line)
+                (insert line)))
+            (setq buffer-read-only t)
+            (when window-state
+              (set-window-point
+               win (vtab--row-column-position (nth 1 window-state)
+                                               (length tabs)))
+              (set-window-start
+               win (vtab--line-position
+                    (min (nth 0 window-state) (max 1 (length tabs)))) t)
+              (set-window-vscroll win (nth 2 window-state) t))
+            (goto-char (vtab--row-column-position buffer-point
+                                                  (length tabs)))))
+        (set-frame-parameter nil 'vtab--tab-state new-state)))
     current))
 
 (defun vtab--scroll-to-current-tab (win current)
@@ -281,48 +270,56 @@ lines when the vtab mode line is hidden."
              (window-live-p win)
              (integerp current))
     (with-current-buffer (window-buffer win)
-      (let* ((target-line (1+ current))
-             (height (vtab--window-body-lines win))
-             (start-line (line-number-at-pos (window-start win) t))
-             (end-line (1- (+ start-line height)))
-             (new-start-line
-              (cond
-               ((< target-line start-line)
-                target-line)
-               ((> target-line end-line)
-                (max 1 (1+ (- target-line height)))))))
-        (when new-start-line
-          (let ((start-pos (vtab--line-position new-start-line)))
-            (set-window-vscroll win 0)
-            (set-window-start win start-pos)
-            (set-window-point win start-pos)))))))
+      (let ((target (vtab--line-position (1+ current))))
+        (unless (pos-visible-in-window-p target win)
+          (let ((new-start target))
+            (unless (<= target (window-start win))
+              (let ((target-next-bol
+                     (save-excursion
+                       (goto-char target)
+                       (line-beginning-position 2)))
+                    (body (window-body-height win t))
+                    previous)
+                (while (and (> new-start (point-min))
+                            (progn
+                              (setq previous
+                                    (save-excursion
+                                      (goto-char new-start)
+                                      (line-beginning-position 0)))
+                              (<= (cdr (window-text-pixel-size
+                                        win previous target-next-bol
+                                        nil nil nil t))
+                                  body)))
+                  (setq new-start previous))))
+            (set-window-point win target)
+            (set-window-start win new-start)
+            (set-window-vscroll win 0 t)))))))
+
+(defun vtab--set-buffer-option-hidden (variable hidden)
+  "Set VARIABLE to nil while HIDDEN, restoring its prior local state otherwise."
+  (let ((saved (assq variable vtab--saved-buffer-settings)))
+    (cond
+     (hidden
+      (unless saved
+        (push (list variable (local-variable-p variable) (symbol-value variable))
+              vtab--saved-buffer-settings))
+      (set (make-local-variable variable) nil))
+     (saved
+      (if (nth 1 saved)
+          (set (make-local-variable variable) (nth 2 saved))
+        (kill-local-variable variable))
+      (setq vtab--saved-buffer-settings
+            (assq-delete-all variable vtab--saved-buffer-settings))))))
 
 (defun vtab--apply-buffer-options (win)
   "Apply side-window buffer-local options for WIN."
   (with-current-buffer (window-buffer win)
-    (if vtab-hide-cursor
-        (progn
-          (setq-local cursor-type nil)
-          (setq-local cursor-in-non-selected-windows nil)
-          (when (fboundp 'set-window-cursor-type)
-            (set-window-cursor-type win nil)))
-      (kill-local-variable 'cursor-type)
-      (kill-local-variable 'cursor-in-non-selected-windows)
-      (when (fboundp 'set-window-cursor-type)
-        (set-window-cursor-type win t)))
-    (if vtab-hide-mode-line
-        (progn
-          (setq-local mode-line-format nil)
-          (setq-local header-line-format nil))
-      (kill-local-variable 'mode-line-format)
-      (kill-local-variable 'header-line-format))
+    (vtab--set-buffer-option-hidden 'cursor-type vtab-hide-cursor)
+    (vtab--set-buffer-option-hidden 'cursor-in-non-selected-windows
+                                    vtab-hide-cursor)
+    (vtab--set-buffer-option-hidden 'mode-line-format vtab-hide-mode-line)
+    (vtab--set-buffer-option-hidden 'header-line-format vtab-hide-mode-line)
     (force-mode-line-update)))
-
-(defun vtab--apply-window-options (win)
-  "Apply side-window options for WIN."
-  (if vtab-hide-scroll-bars
-      (set-window-scroll-bars win 0 nil 0 nil t)
-    (set-window-scroll-bars win nil nil nil nil t)))
 
 (defun vtab--click (event)
   "Select tab by mouse click EVENT."
@@ -342,35 +339,20 @@ lines when the vtab mode line is hidden."
 (defun vtab--ensure-visible ()
   "Ensure the vertical tab bar is visible when `vtab-mode' is enabled."
   (when vtab-mode
-    (let ((win (get-buffer-window (vtab--get-buffer))))
+    (let* ((buf (vtab--get-buffer))
+           (win (get-buffer-window buf)))
       (unless win
         (setq win (display-buffer-in-side-window
-                   (vtab--get-buffer)
-                   `((side . ,vtab-side)
-                     (window-width . ,vtab-window-width)))))
-      ;; Exclude from other-window (C-x o)
-      (set-window-parameter win 'no-other-window t)
-      ;; Protect from delete-other-windows
-      (set-window-parameter win 'no-delete-other-windows t)
-      ;; Remove fringes for clean border
-      (set-window-fringes win 0 0)
-      ;; Apply buffer-local side-window display options.
-      (vtab--apply-buffer-options win)
-      ;; Apply window-local side-window display options.
-      (vtab--apply-window-options win)
-      (vtab--scroll-to-current-tab win (vtab--refresh)))))
-
-(defun vtab--preserve-window-start-around-tab-select (orig-fun &rest args)
-  "Preserve vtab viewport around `tab-bar-select-tab'."
-  (if (not vtab-mode)
-      (apply orig-fun args)
-    (let ((state (vtab--window-state))
-          (vtab--selecting-tab t))
-      (prog1 (apply orig-fun args)
-        (vtab--ensure-visible)
-        (vtab--restore-window-state state)
-        (when-let* ((win (get-buffer-window (vtab--get-buffer))))
-          (vtab--scroll-to-current-tab win (vtab--current-tab-index)))))))
+                   buf `((side . ,vtab-side)
+                         (window-width . ,vtab-window-width)))))
+      (when (window-live-p win)
+        (set-window-parameter win 'no-other-window t)
+        (set-window-parameter win 'no-delete-other-windows t)
+        (set-window-fringes win 0 0)
+        (vtab--apply-buffer-options win)
+        (set-window-scroll-bars win nil (unless vtab-hide-scroll-bars t)
+                                nil (unless vtab-hide-scroll-bars t) t)
+        (vtab--scroll-to-current-tab win (vtab--refresh))))))
 
 ;;;; Commands
 
@@ -384,28 +366,30 @@ lines when the vtab mode line is hidden."
 
 (defun vtab--on-tab-select (&rest _)
   "Hook function called after tab selection."
-  (unless vtab--selecting-tab
-    (vtab--ensure-visible)))
+  (vtab--ensure-visible))
 
 (defun vtab--on-tab-open (&rest _)
   "Hook function called after tab creation."
   (vtab--ensure-visible))
 
-(defun vtab--on-buffer-change (&rest _)
+(defun vtab--on-buffer-change (frame)
   "Hook function called after buffer change."
   (when vtab-mode
-    (vtab--refresh)))
+    (with-selected-frame frame
+      (vtab--refresh))))
 
 (defun vtab--on-org-agenda-finalize ()
   "Hook function called after `org-agenda' display."
   (vtab--ensure-visible))
 
 (defun vtab--on-window-size-change (&optional frame)
-  "Hook function called after window size change in FRAME.
+  "Hook function called after window size change.
 Adjust the side window width to match `vtab-window-width'."
   (when (and vtab-mode (not vtab--resizing))
     (let ((f (or frame (selected-frame))))
-      (when-let* ((win (get-buffer-window (vtab--get-buffer f) f)))
+      (when-let* ((buf (frame-parameter f 'vtab--buffer))
+                  ((buffer-live-p buf))
+                  (win (get-buffer-window buf f)))
         (let ((current-width (window-width win)))
           (unless (= current-width vtab-window-width)
             (let ((vtab--resizing t))
@@ -426,7 +410,8 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (when-let* ((buf (frame-parameter frame 'vtab--buffer)))
     (when (buffer-live-p buf)
       (kill-buffer buf)))
-  (set-frame-parameter frame 'vtab--buffer nil))
+  (set-frame-parameter frame 'vtab--buffer nil)
+  (set-frame-parameter frame 'vtab--tab-state nil))
 
 ;;;; Enable / Disable
 
@@ -461,12 +446,14 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (setq tab-bar-new-tab-to vtab-new-tab-position)
   (setq tab-bar-new-tab-choice vtab-new-tab-choice)
   ;; Add hooks
-  (unless (advice-member-p #'vtab--preserve-window-start-around-tab-select
-                           'tab-bar-select-tab)
-    (advice-add 'tab-bar-select-tab
-                :around #'vtab--preserve-window-start-around-tab-select))
-  (add-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select)
+  (if (boundp 'tab-bar-tab-post-select-functions)
+      (add-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select)
+    ;; Emacs 27--29 need this simple after-advice fallback.
+    (advice-add 'tab-bar-select-tab :after #'vtab--on-tab-select))
   (add-hook 'tab-bar-tab-post-open-functions #'vtab--on-tab-open)
+  ;; There is no post-close hook through Emacs 31.
+  (advice-add 'tab-bar-close-tab :after #'vtab--on-tab-select)
+  (advice-add 'tab-bar-close-other-tabs :after #'vtab--on-tab-select)
   (add-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
   (add-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (add-hook 'window-size-change-functions #'vtab--on-window-size-change)
@@ -492,14 +479,19 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
         (delete-window win))
       (when (buffer-live-p buf)
         (kill-buffer buf)))
-    (set-frame-parameter frame 'vtab--buffer nil))
+    (set-frame-parameter frame 'vtab--buffer nil)
+    (set-frame-parameter frame 'vtab--tab-state nil))
   ;; Remove frame hooks
   (remove-hook 'after-make-frame-functions #'vtab--setup-new-frame)
   (remove-hook 'delete-frame-functions #'vtab--on-frame-delete)
   ;; Remove hooks
-  (advice-remove 'tab-bar-select-tab #'vtab--preserve-window-start-around-tab-select)
-  (remove-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select)
+  ;; Do not bind the optional post-select hook on older Emacs versions.
+  (when (boundp 'tab-bar-tab-post-select-functions)
+    (remove-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select))
+  (advice-remove 'tab-bar-select-tab #'vtab--on-tab-select)
   (remove-hook 'tab-bar-tab-post-open-functions #'vtab--on-tab-open)
+  (advice-remove 'tab-bar-close-tab #'vtab--on-tab-select)
+  (advice-remove 'tab-bar-close-other-tabs #'vtab--on-tab-select)
   (remove-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
   (remove-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (remove-hook 'window-size-change-functions #'vtab--on-window-size-change)
