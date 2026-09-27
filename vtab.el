@@ -2,7 +2,7 @@
 
 ;; Author: mugen <mugen.void42@gmail.com>
 ;; URL: https://github.com/mugen-void/vtab
-;; Version: 1.1.0
+;; Version: 1.2.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: convenience, frames
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -39,6 +39,8 @@
 ;;   M-s [key]  Direct tab selection (right-hand layout):
 ;;     7890 -> tab 1-4,  uiop -> tab 5-8
 ;;     jkl; -> tab 9-12, m,./ -> tab 13-16
+;;   On a group header: TAB toggles expansion, RET selects its first tab.
+;;   Click the arrow to toggle expansion or the name to select the group.
 ;;   Customize via (define-key vtab-mode-map ...)
 
 ;;; Code:
@@ -135,49 +137,144 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
     map)
   "Keymap used in the vertical tab bar buffer.")
 
+(defvar vtab--group-keymap
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'vtab--click-group)
+    (define-key map (kbd "RET") #'vtab--select-group)
+    (define-key map (kbd "TAB") #'vtab--toggle-group)
+    map)
+  "Keymap for group headers in the vertical tab bar.")
+
+(defvar vtab--group-toggle-keymap
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map vtab--group-keymap)
+    (define-key map [mouse-1] #'vtab--click-toggle-group)
+    map)
+  "Keymap for the expand/collapse indicator on a group header.")
+
 ;;;; Faces
 
 (defface vtab-active-face
   '((t :background "#3a3a8a" :foreground "#aaaaaa" :weight bold))
   "Face for the active tab.")
 
+(defface vtab-group-face
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "Face for a group header.")
+
+(defface vtab-active-group-face
+  '((t :inherit vtab-active-face))
+  "Face for the group containing the active tab.")
+
 ;;;; Internal Functions
 
-(defun vtab--current-tab-index ()
-  "Return the index of the current tab."
-  (seq-position (tab-bar-tabs)
-                'current-tab
-                (lambda (tab _) (eq (car tab) 'current-tab))))
-
 (defun vtab--get-tabs ()
-  "Return list of tab names."
-  (mapcar (lambda (tab)
-            (alist-get 'name tab))
-          (tab-bar-tabs)))
+  "Return (INDEX NAME GROUP CURRENT) for each tab on the selected frame."
+  (let ((index 0))
+    (mapcar (lambda (tab)
+              (list (setq index (1+ index))
+                    (alist-get 'name tab)
+                    (alist-get 'group tab)
+                    (eq (car tab) 'current-tab)))
+            (tab-bar-tabs))))
+
+(defun vtab--insert-tab (tab grouped)
+  "Insert TAB, indenting it when GROUPED is non-nil."
+  (pcase-let ((`(,index ,name ,_group ,current) tab))
+    (insert (propertize (format "%s%s %d: %s\n"
+                                (if grouped "  " "")
+                                (if current ">" " ") index name)
+                        'vtab-index index
+                        'mouse-face 'highlight
+                        'keymap vtab--buffer-keymap
+                        'face (when current 'vtab-active-face)))))
+
+(defun vtab--insert-group (group tabs collapsed)
+  "Insert header for GROUP and its TABS unless GROUP is COLLAPSED."
+  (let* ((first-tab (car tabs))
+         (active (seq-some (lambda (tab) (nth 3 tab)) tabs))
+         (face (if active 'vtab-active-group-face 'vtab-group-face))
+         (properties (list 'vtab-group-header t
+                           'vtab-group group
+                           'vtab-group-first-tab (car first-tab)
+                           'mouse-face 'highlight
+                           'face face)))
+    (insert (apply #'propertize (if collapsed "▶ " "▼ ")
+                   (append properties (list 'keymap vtab--group-toggle-keymap))))
+    (insert (apply #'propertize (format "%s\n" (or group "Other"))
+                   (append properties (list 'keymap vtab--group-keymap))))
+    (unless collapsed
+      (dolist (tab tabs)
+        (vtab--insert-tab tab t)))))
+
+(defun vtab--insert-tabs (tabs collapsed-groups)
+  "Insert TABS, grouping them when necessary using COLLAPSED-GROUPS."
+  (if (seq-some (lambda (tab) (nth 2 tab)) tabs)
+      (dolist (group (seq-uniq (mapcar (lambda (tab) (nth 2 tab)) tabs)))
+        (vtab--insert-group group
+                            (seq-filter (lambda (tab) (equal (nth 2 tab) group)) tabs)
+                            (member group collapsed-groups)))
+    (dolist (tab tabs)
+      (vtab--insert-tab tab nil))))
 
 (defun vtab--refresh ()
   "Refresh the vertical tab bar buffer."
   (let* ((tabs (vtab--get-tabs))
-         (current (vtab--current-tab-index))
-         (new-state (cons current tabs)))
-    (when (and current
-               (not (equal new-state (frame-parameter nil 'vtab--tab-state))))
+         (collapsed (frame-parameter nil 'vtab--collapsed-groups))
+         (new-state (cons collapsed tabs)))
+    (unless (equal new-state (frame-parameter nil 'vtab--tab-state))
       (set-frame-parameter nil 'vtab--tab-state new-state)
       (let ((buf (vtab--get-buffer)))
         (with-current-buffer buf
-          (let ((inhibit-read-only t))
+          (let ((inhibit-read-only t)
+                (line (line-number-at-pos)))
             (erase-buffer)
-            (dotimes (i (length tabs))
-              (let* ((name (nth i tabs))
-                     (is-current (= i current))
-                     (marker (if is-current ">" " "))
-                     (line (format "%s %d: %s\n" marker (1+ i) name)))
-                (insert (propertize line
-                                    'vtab-index (1+ i)
-                                    'mouse-face 'highlight
-                                    'keymap vtab--buffer-keymap
-                                    'face (when is-current 'vtab-active-face)))))
+            (vtab--insert-tabs tabs collapsed)
+            (goto-char (point-min))
+            (forward-line (1- line))
             (setq buffer-read-only t)))))))
+
+(defun vtab--toggle-group-at (pos)
+  "Toggle the group header at POS in the vtab buffer."
+  (when (get-text-property pos 'vtab-group-header)
+    (let* ((group (get-text-property pos 'vtab-group))
+           (collapsed (frame-parameter nil 'vtab--collapsed-groups)))
+      (set-frame-parameter nil 'vtab--collapsed-groups
+                           (if (member group collapsed)
+                               (seq-remove (lambda (name) (equal name group)) collapsed)
+                             (cons group collapsed)))
+      (vtab--refresh))))
+
+(defun vtab--toggle-group ()
+  "Expand or collapse the group at point."
+  (interactive)
+  (vtab--toggle-group-at (point)))
+
+(defun vtab--click-toggle-group (event)
+  "Expand or collapse the group clicked in EVENT."
+  (interactive "e")
+  (vtab--toggle-group-at (posn-point (event-end event))))
+
+(defun vtab--select-group-at (pos)
+  "Select the first tab of the group header at POS."
+  (when (get-text-property pos 'vtab-group-header)
+    (let ((group (get-text-property pos 'vtab-group))
+          (index (get-text-property pos 'vtab-group-first-tab)))
+      (set-frame-parameter nil 'vtab--collapsed-groups
+                           (seq-remove (lambda (name) (equal name group))
+                                       (frame-parameter nil 'vtab--collapsed-groups)))
+      (tab-bar-select-tab index)
+      (vtab--refresh))))
+
+(defun vtab--select-group ()
+  "Select the first tab of the group at point."
+  (interactive)
+  (vtab--select-group-at (point)))
+
+(defun vtab--click-group (event)
+  "Select the first tab of the group clicked in EVENT."
+  (interactive "e")
+  (vtab--select-group-at (posn-point (event-end event))))
 
 (defun vtab--click (event)
   "Select tab by mouse click EVENT."
@@ -231,8 +328,8 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
   "Hook function called after tab creation."
   (vtab--ensure-visible))
 
-(defun vtab--on-buffer-change (&rest _)
-  "Hook function called after buffer change."
+(defun vtab--refresh-if-enabled (&rest _)
+  "Refresh the sidebar when `vtab-mode' is enabled."
   (when vtab-mode
     (vtab--refresh)))
 
@@ -265,7 +362,8 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
     (when (buffer-live-p buf)
       (kill-buffer buf)))
   (set-frame-parameter frame 'vtab--buffer nil)
-  (set-frame-parameter frame 'vtab--tab-state nil))
+  (set-frame-parameter frame 'vtab--tab-state nil)
+  (set-frame-parameter frame 'vtab--collapsed-groups nil))
 
 ;;;; Enable / Disable
 
@@ -302,7 +400,10 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   ;; Add hooks
   (add-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select)
   (add-hook 'tab-bar-tab-post-open-functions #'vtab--on-tab-open)
-  (add-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
+  (add-hook 'tab-bar-tab-post-change-group-functions #'vtab--refresh-if-enabled t)
+  ;; Catch renames, moves and inactive group closures without post-change hooks.
+  (add-hook 'post-command-hook #'vtab--refresh-if-enabled)
+  (add-hook 'window-buffer-change-functions #'vtab--refresh-if-enabled)
   (add-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (add-hook 'window-size-change-functions #'vtab--on-window-size-change)
   ;; Add to window-persistent-parameters
@@ -328,14 +429,17 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
       (when (buffer-live-p buf)
         (kill-buffer buf)))
     (set-frame-parameter frame 'vtab--buffer nil)
-    (set-frame-parameter frame 'vtab--tab-state nil))
+    (set-frame-parameter frame 'vtab--tab-state nil)
+    (set-frame-parameter frame 'vtab--collapsed-groups nil))
   ;; Remove frame hooks
   (remove-hook 'after-make-frame-functions #'vtab--setup-new-frame)
   (remove-hook 'delete-frame-functions #'vtab--on-frame-delete)
   ;; Remove hooks
   (remove-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select)
   (remove-hook 'tab-bar-tab-post-open-functions #'vtab--on-tab-open)
-  (remove-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
+  (remove-hook 'tab-bar-tab-post-change-group-functions #'vtab--refresh-if-enabled)
+  (remove-hook 'post-command-hook #'vtab--refresh-if-enabled)
+  (remove-hook 'window-buffer-change-functions #'vtab--refresh-if-enabled)
   (remove-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (remove-hook 'window-size-change-functions #'vtab--on-window-size-change)
   ;; Remove from window-persistent-parameters
