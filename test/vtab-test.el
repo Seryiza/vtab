@@ -65,6 +65,7 @@ FILL-ENABLED controls active-row filling and ACTIVE-INDEX is zero based."
         (end-of-line)
         (should (eq (char-after) ?\n))
         (should (equal (get-text-property (point) 'vtab-index) (1+ index)))
+        (should-not (get-text-property (point) 'mouse-face))
         (let ((map (get-text-property (point) 'keymap)))
           (should (keymapp map))
           (should (commandp (lookup-key map (kbd "RET")))))

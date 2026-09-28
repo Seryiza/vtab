@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## v1.2.0
+
+- Display native tab groups with frame-local collapse/expand controls
+- Select a group's first tab from its header while preserving absolute tab numbers
+- Refresh the sidebar after group changes and inactive-group closure
+
 ## v1.1.0
 
 - Add defcustom for window-divider and fringe styling control
