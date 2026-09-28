@@ -89,11 +89,33 @@
           (tab-bar-change-tab-group "B")
           (tab-bar-select-tab 1)
           (tab-bar-close-group-tabs "B")
-           ;; Simulate the post-command hook after an interactive command.
-           (vtab--refresh-if-enabled)
           (should-not (string-match-p "▼ B" (with-current-buffer (vtab--get-buffer)
                                                (buffer-string)))))
       (vtab-mode -1))))
+
+(ert-deftest vtab-refreshes-after-direct-tab-mutations ()
+  (let ((vtab-style-fringe nil)
+        (vtab-style-window-divider nil))
+    (unwind-protect
+        (progn
+          (vtab-mode 1)
+          (tab-bar-new-tab)
+          (tab-bar-rename-tab "renamed")
+          (should (string-match-p "2: renamed" (with-current-buffer (vtab--get-buffer)
+                                                  (buffer-string))))
+          (tab-bar-move-tab-to 1)
+          (should (string-match-p "> 1: renamed" (with-current-buffer (vtab--get-buffer)
+                                                    (buffer-string))))
+          (tab-bar-new-tab)
+          (tab-bar-select-tab 1)
+          (tab-bar-close-tab 3)
+          (should-not (string-match-p "3:" (with-current-buffer (vtab--get-buffer)
+                                             (buffer-string))))
+          (tab-bar-close-other-tabs)
+          (should-not (string-match-p "2:" (with-current-buffer (vtab--get-buffer)
+                                             (buffer-string)))))
+      (vtab-mode -1))
+    (should-not (advice-member-p #'vtab--refresh-if-enabled 'tab-bar-move-tab-to))))
 
 (provide 'vtab-tests)
 

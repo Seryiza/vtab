@@ -401,8 +401,10 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (add-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select)
   (add-hook 'tab-bar-tab-post-open-functions #'vtab--on-tab-open)
   (add-hook 'tab-bar-tab-post-change-group-functions #'vtab--refresh-if-enabled t)
-  ;; Catch renames, moves and inactive group closures without post-change hooks.
-  (add-hook 'post-command-hook #'vtab--refresh-if-enabled)
+  ;; These operations do not have post-change hooks.
+  (dolist (command '(tab-bar-rename-tab tab-bar-move-tab-to
+                     tab-bar-close-tab tab-bar-close-other-tabs))
+    (advice-add command :after #'vtab--refresh-if-enabled))
   (add-hook 'window-buffer-change-functions #'vtab--refresh-if-enabled)
   (add-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (add-hook 'window-size-change-functions #'vtab--on-window-size-change)
@@ -438,7 +440,9 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (remove-hook 'tab-bar-tab-post-select-functions #'vtab--on-tab-select)
   (remove-hook 'tab-bar-tab-post-open-functions #'vtab--on-tab-open)
   (remove-hook 'tab-bar-tab-post-change-group-functions #'vtab--refresh-if-enabled)
-  (remove-hook 'post-command-hook #'vtab--refresh-if-enabled)
+  (dolist (command '(tab-bar-rename-tab tab-bar-move-tab-to
+                     tab-bar-close-tab tab-bar-close-other-tabs))
+    (advice-remove command #'vtab--refresh-if-enabled))
   (remove-hook 'window-buffer-change-functions #'vtab--refresh-if-enabled)
   (remove-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (remove-hook 'window-size-change-functions #'vtab--on-window-size-change)
