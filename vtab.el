@@ -190,6 +190,11 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
            (not (window-minibuffer-p window)))
       (set-frame-parameter nil 'vtab--last-selected-window window)))))
 
+(defun vtab--protect-before-command ()
+  "Leave vtab's keyboard commands in their buffer until they finish."
+  (unless (memq this-command '(vtab--select vtab--select-group vtab--toggle-group))
+    (vtab--protect-selected-window)))
+
 (defvar-local vtab--saved-buffer-settings nil
   "Alist of buffer-local display settings changed by vtab.")
 
@@ -626,7 +631,7 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (add-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
   (add-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (add-hook 'window-size-change-functions #'vtab--on-window-size-change)
-  (add-hook 'pre-command-hook #'vtab--protect-selected-window)
+  (add-hook 'pre-command-hook #'vtab--protect-before-command)
   (add-hook 'post-command-hook #'vtab--protect-selected-window)
   ;; Add to window-persistent-parameters
   (add-to-list 'window-persistent-parameters '(no-delete-other-windows . t))
@@ -671,7 +676,7 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (remove-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
   (remove-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (remove-hook 'window-size-change-functions #'vtab--on-window-size-change)
-  (remove-hook 'pre-command-hook #'vtab--protect-selected-window)
+  (remove-hook 'pre-command-hook #'vtab--protect-before-command)
   (remove-hook 'post-command-hook #'vtab--protect-selected-window)
   ;; Remove from window-persistent-parameters
   (setq window-persistent-parameters
