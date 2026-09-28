@@ -128,6 +128,34 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
 (defvar vtab--resizing nil
   "Non-nil while vtab is resizing window to prevent infinite loop.")
 
+(defun vtab--regular-window-p (window)
+  "Return non-nil if WINDOW is a regular non-vtab window."
+  (and (window-live-p window)
+       (not (window-minibuffer-p window))
+       (not (eq (window-buffer window)
+                (frame-parameter (window-frame window) 'vtab--buffer)))))
+
+(defun vtab--select-last-window ()
+  "Select the remembered non-vtab window."
+  (when-let ((window
+              (or (and (vtab--regular-window-p
+                        (frame-parameter nil 'vtab--last-selected-window))
+                       (frame-parameter nil 'vtab--last-selected-window))
+                  (seq-find #'vtab--regular-window-p
+                            (window-list nil 'nomini)))))
+    (select-window window)))
+
+(defun vtab--protect-selected-window (&rest _)
+  "Keep selected window out of the vtab side buffer."
+  (let ((window (selected-window)))
+    (cond
+     ((eq (window-buffer window)
+          (frame-parameter nil 'vtab--buffer))
+      (vtab--select-last-window))
+     ((and (window-live-p window)
+           (not (window-minibuffer-p window)))
+      (set-frame-parameter nil 'vtab--last-selected-window window)))))
+
 (defvar vtab--buffer-keymap
   (let ((map (make-sparse-keymap)))
     (define-key map [mouse-1] #'vtab--click)
@@ -171,30 +199,40 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
               (let* ((name (nth i tabs))
                      (is-current (= i current))
                      (marker (if is-current ">" " "))
-                     (line (format "%s %d: %s\n" marker (1+ i) name)))
+                     (line (format "%s %d: %s" marker (1+ i) name)))
                 (insert (propertize line
                                     'vtab-index (1+ i)
                                     'mouse-face 'highlight
                                     'keymap vtab--buffer-keymap
-                                    'face (when is-current 'vtab-active-face)))))
+                                    'face (when is-current 'vtab-active-face)))
+                (insert "\n")))
             (setq buffer-read-only t)))))))
+
+(defun vtab--select-tab (index)
+  "Select tab INDEX without leaving the vtab window selected."
+  (vtab--select-last-window)
+  (tab-bar-select-tab index)
+  (vtab--select-last-window)
+  (vtab--refresh))
 
 (defun vtab--click (event)
   "Select tab by mouse click EVENT."
   (interactive "e")
-  (let* ((pos (posn-point (event-end event)))
-         (idx (get-text-property pos 'vtab-index)))
+  (let* ((posn (event-end event))
+         (window (posn-window posn))
+         (pos (posn-point posn))
+         (idx (when (and (windowp window) (integerp pos))
+                (with-current-buffer (window-buffer window)
+                  (get-text-property pos 'vtab-index)))))
     (when idx
-      (tab-bar-select-tab idx)
-      (vtab--refresh))))
+      (vtab--select-tab idx))))
 
 (defun vtab--select ()
   "Select tab at point."
   (interactive)
   (let ((idx (get-text-property (point) 'vtab-index)))
     (when idx
-      (tab-bar-select-tab idx)
-      (vtab--refresh))))
+      (vtab--select-tab idx))))
 
 (defun vtab--ensure-visible ()
   "Ensure the vertical tab bar is visible when `vtab-mode' is enabled."
@@ -305,6 +343,8 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (add-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
   (add-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (add-hook 'window-size-change-functions #'vtab--on-window-size-change)
+  (add-hook 'pre-command-hook #'vtab--protect-selected-window)
+  (add-hook 'post-command-hook #'vtab--protect-selected-window)
   ;; Add to window-persistent-parameters
   (add-to-list 'window-persistent-parameters '(no-delete-other-windows . t))
   ;; Thin window divider
@@ -316,6 +356,7 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (when vtab-style-fringe
     (set-face-background 'fringe nil))
   ;; Show side window
+  (vtab--protect-selected-window)
   (vtab--ensure-visible))
 
 (defun vtab--disable ()
@@ -328,7 +369,8 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
       (when (buffer-live-p buf)
         (kill-buffer buf)))
     (set-frame-parameter frame 'vtab--buffer nil)
-    (set-frame-parameter frame 'vtab--tab-state nil))
+    (set-frame-parameter frame 'vtab--tab-state nil)
+    (set-frame-parameter frame 'vtab--last-selected-window nil))
   ;; Remove frame hooks
   (remove-hook 'after-make-frame-functions #'vtab--setup-new-frame)
   (remove-hook 'delete-frame-functions #'vtab--on-frame-delete)
@@ -338,6 +380,8 @@ Hide top tab bar and show side window if `vtab-mode' is enabled."
   (remove-hook 'window-buffer-change-functions #'vtab--on-buffer-change)
   (remove-hook 'org-agenda-finalize-hook #'vtab--on-org-agenda-finalize)
   (remove-hook 'window-size-change-functions #'vtab--on-window-size-change)
+  (remove-hook 'pre-command-hook #'vtab--protect-selected-window)
+  (remove-hook 'post-command-hook #'vtab--protect-selected-window)
   ;; Remove from window-persistent-parameters
   (setq window-persistent-parameters
         (delete '(no-delete-other-windows . t) window-persistent-parameters))
