@@ -291,6 +291,7 @@ then restore their tab and window setup so tests remain independent."
         (should (= (vtab-test--current-index) 1))))))
 
 (ert-deftest vtab-group-keyboard-command-runs-before-focus-is-restored ()
+  (skip-unless (fboundp 'tab-bar-change-tab-group))
   (vtab-test--with-sandbox
     (vtab-mode 1)
     (tab-bar-change-tab-group "A")

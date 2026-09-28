@@ -92,6 +92,8 @@
       (set-frame-parameter frame 'vtab--collapsed-groups old-collapsed))))
 
 (ert-deftest vtab-refreshes-when-a-group-changes-or-an-inactive-group-closes ()
+  (skip-unless (and (fboundp 'tab-bar-change-tab-group)
+                    (fboundp 'tab-bar-close-group-tabs)))
   (let ((vtab-style-fringe nil)
         (vtab-style-window-divider nil)
         (frame (selected-frame))
