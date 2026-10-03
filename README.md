@@ -80,10 +80,30 @@ exist. If there are no groups, the familiar flat tab list is shown. Tab
 numbers always refer to their absolute positions, including when a group is
 collapsed.
 
+Tabs stay in their native Emacs order. Each contiguous section of a group has
+its own header, so the same group can appear more than once. For example,
+`A1 A2 B1 A3 A4` is displayed as:
+
+```text
+▼ A
+    1: A1
+    2: A2
+▼ B
+    3: B1
+▼ A
+    4: A3
+    5: A4
+```
+
+This keeps the displayed order consistent with `tab-next`, `tab-previous`,
+and `tab-move`.
+
 On a group header, press `TAB` or click the arrow to collapse/expand it. Press
-`RET` or click the group name to expand it and select its first tab. Collapse
-state belongs to the frame's `vtab` display; it does not alter the tabs or
-their groups. Native tab groups cannot exist without any tabs.
+`RET` or click the group name to expand it and select the first tab of that
+section. All sections of the same group share collapse state within a frame,
+including repeated **Other** sections. Collapse state belongs to the frame's
+`vtab` display; it does not alter the tabs or their groups. Native tab groups
+cannot exist without any tabs.
 
 For one group per `project.el` project, `vtab` can be used with
 [`project-tab-groups`](https://github.com/fritzgrabo/project-tab-groups):

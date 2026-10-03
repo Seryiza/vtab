@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased
+
+- Preserve native tab order with a header for each contiguous group section
+- Select each section's first tab while sharing collapse state across sections of a group
+- Keep point on the operated section header when expanding or collapsing repeated groups
+
 ## v1.2.0
 
 - Display native tab groups with frame-local collapse/expand controls

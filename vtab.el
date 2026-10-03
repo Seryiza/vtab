@@ -39,7 +39,8 @@
 ;;   M-s [key]  Direct tab selection (right-hand layout):
 ;;     7890 -> tab 1-4,  uiop -> tab 5-8
 ;;     jkl; -> tab 9-12, m,./ -> tab 13-16
-;;   On a group header: TAB toggles expansion, RET selects its first tab.
+;;   Each contiguous group section has a header in the original tab order.
+;;   On a group header: TAB toggles expansion, RET selects the section's first tab.
 ;;   Click the arrow to toggle expansion or the name to select the group.
 ;;   Customize via (define-key vtab-mode-map ...)
 
@@ -190,7 +191,7 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
                         'face (when current 'vtab-active-face)))))
 
 (defun vtab--insert-group (group tabs collapsed)
-  "Insert header for GROUP and its TABS unless GROUP is COLLAPSED."
+  "Insert header for a contiguous GROUP section and its TABS unless COLLAPSED."
   (let* ((first-tab (car tabs))
          (active (seq-some (lambda (tab) (nth 3 tab)) tabs))
          (face (if active 'vtab-active-group-face 'vtab-group-face))
@@ -208,12 +209,18 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
         (vtab--insert-tab tab t)))))
 
 (defun vtab--insert-tabs (tabs collapsed-groups)
-  "Insert TABS, grouping them when necessary using COLLAPSED-GROUPS."
+  "Insert TABS in order with headers for contiguous group sections.
+COLLAPSED-GROUPS controls all sections belonging to each group."
   (if (seq-some (lambda (tab) (nth 2 tab)) tabs)
-      (dolist (group (seq-uniq (mapcar (lambda (tab) (nth 2 tab)) tabs)))
-        (vtab--insert-group group
-                            (seq-filter (lambda (tab) (equal (nth 2 tab) group)) tabs)
-                            (member group collapsed-groups)))
+      (let ((remaining tabs))
+        (while remaining
+          (let ((group (nth 2 (car remaining)))
+                section)
+            (while (and remaining (equal (nth 2 (car remaining)) group))
+              (push (car remaining) section)
+              (setq remaining (cdr remaining)))
+            (vtab--insert-group group (nreverse section)
+                                (member group collapsed-groups)))))
     (dolist (tab tabs)
       (vtab--insert-tab tab nil))))
 
@@ -234,16 +241,25 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
             (forward-line (1- line))
             (setq buffer-read-only t)))))))
 
+(defun vtab--goto-group-header (first-tab)
+  "Move point to the section header whose first tab is FIRST-TAB."
+  (with-current-buffer (vtab--get-buffer)
+    (when-let* ((header (text-property-any (point-min) (point-max)
+                                         'vtab-group-first-tab first-tab)))
+      (goto-char header))))
+
 (defun vtab--toggle-group-at (pos)
-  "Toggle the group header at POS in the vtab buffer."
+  "Toggle the group header at POS, keeping point on that section's header."
   (when (get-text-property pos 'vtab-group-header)
     (let* ((group (get-text-property pos 'vtab-group))
+           (first-tab (get-text-property pos 'vtab-group-first-tab))
            (collapsed (frame-parameter nil 'vtab--collapsed-groups)))
       (set-frame-parameter nil 'vtab--collapsed-groups
                            (if (member group collapsed)
                                (seq-remove (lambda (name) (equal name group)) collapsed)
                              (cons group collapsed)))
-      (vtab--refresh))))
+      (vtab--refresh)
+      (vtab--goto-group-header first-tab))))
 
 (defun vtab--toggle-group ()
   "Expand or collapse the group at point."
@@ -256,7 +272,7 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
   (vtab--toggle-group-at (posn-point (event-end event))))
 
 (defun vtab--select-group-at (pos)
-  "Select the first tab of the group header at POS."
+  "Select the first tab of the group section whose header is at POS."
   (when (get-text-property pos 'vtab-group-header)
     (let ((group (get-text-property pos 'vtab-group))
           (index (get-text-property pos 'vtab-group-first-tab)))
@@ -264,15 +280,16 @@ Each frame gets its own dedicated buffer stored as a frame parameter."
                            (seq-remove (lambda (name) (equal name group))
                                        (frame-parameter nil 'vtab--collapsed-groups)))
       (tab-bar-select-tab index)
-      (vtab--refresh))))
+      (vtab--refresh)
+      (vtab--goto-group-header index))))
 
 (defun vtab--select-group ()
-  "Select the first tab of the group at point."
+  "Select the first tab of the group section at point."
   (interactive)
   (vtab--select-group-at (point)))
 
 (defun vtab--click-group (event)
-  "Select the first tab of the group clicked in EVENT."
+  "Select the first tab of the group section clicked in EVENT."
   (interactive "e")
   (vtab--select-group-at (posn-point (event-end event))))
 
